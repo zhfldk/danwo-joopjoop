@@ -3,24 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>이미지 → 단어장 생성기</title>
+  <title>단어줍줍 · 정확도 모드</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- Icons -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;700&display=swap" rel="stylesheet">
-  <!-- Tesseract.js -->
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <!-- jsPDF & AutoTable -->
+  <!-- PDF -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
   <header class="app-header">
     <div class="brand">
-      <div class="logo">📘</div>
+      <div class="logo">🧺</div>
       <div>
-        <h1>이미지 → 단어장</h1>
-        <p class="subtitle">사진·이미지에서 단어/뜻을 추출해 단어장을 만들고, PDF로 저장/인쇄하세요.</p>
+        <h1>단어줍줍 · 정확도 모드</h1>
+        <p class="subtitle">AI가 분석하고, 낮은 신뢰도만 검토하세요. 3분 안에 정확한 단어장을 만듭니다.</p>
       </div>
     </div>
   </header>
@@ -28,70 +25,52 @@
   <main class="container">
     <section class="card upload-card">
       <h2>1) 이미지 업로드</h2>
-      <p class="hint">여러 장 가능 · JPG/PNG · 드래그 앤 드롭 지원</p>
+      <p class="hint">여러 장 가능 · JPG/PNG/WebP · 드래그 앤 드롭</p>
       <div id="dropzone" class="dropzone rounded">
         <input type="file" id="imageInput" accept="image/*" multiple />
-        <p>이미지를 여기로 드래그하거나 클릭해서 선택</p>
+        <p>이미지를 여기로 드래그하거나 클릭해서 선택하세요</p>
       </div>
+      <div id="thumbs" class="thumbs"></div>
 
       <div class="row">
-        <div class="field">
-          <label>최소 글자수</label>
-          <input type="number" id="minLen" value="2" min="1" />
-        </div>
-        <div class="field">
-          <label>대문자 통일</label>
-          <select id="caseMode">
-            <option value="none">그대로</option>
-            <option value="lower">소문자</option>
-            <option value="upper">대문자</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>뜻 언어</label>
-          <select id="meaningLang">
-            <option value="en">영어 정의</option>
-            <option value="ko">한국어 번역(간단)</option>
-          </select>
-        </div>
+        <label class="radio"><input type="radio" name="meaningOption" value="auto" checked> 뜻 자동 채우기(무료 사전)</label>
+        <label class="radio"><input type="radio" name="meaningOption" value="manual"> 뜻 수동 입력</label>
       </div>
 
       <div class="actions">
-        <button id="startOcrBtn" class="btn primary">OCR 시작</button>
-        <button id="clearBtn" class="btn ghost">초기화</button>
+        <button id="btnAnalyze" class="btn primary">AI 분석 시작</button>
+        <button id="btnClear" class="btn ghost">초기화</button>
       </div>
 
-      <div id="progress" class="progress hidden">
-        <div class="bar" id="progressBar" style="width:0%"></div>
-        <div class="label" id="progressLabel">대기 중…</div>
-      </div>
+      <div id="status" class="status">대기 중…</div>
     </section>
 
     <section class="card results-card">
       <h2>2) 단어장 결과</h2>
       <div class="actions">
-        <button id="fillMeaningsBtn" class="btn">뜻 채우기(사전)</button>
-        <button id="dedupeBtn" class="btn">중복 정리</button>
-        <button id="exportCsvBtn" class="btn">CSV 내보내기</button>
-        <button id="printBtn" class="btn">인쇄</button>
-        <button id="savePdfBtn" class="btn success">PDF 저장</button>
+        <button id="btnFill" class="btn">뜻 채우기(무료 사전)</button>
+        <button id="btnDedupe" class="btn">중복 정리</button>
+        <button id="btnExport" class="btn">CSV 내보내기</button>
+        <button id="btnPrint" class="btn">인쇄</button>
+        <button id="btnPdf" class="btn success">PDF 저장</button>
       </div>
 
       <div class="table-wrap rounded">
-        <table id="wordTable">
+        <table id="table">
           <thead>
             <tr>
               <th>#</th>
               <th>단어</th>
-              <th>뜻</th>
-              <th>품사</th>
-              <th>예문</th>
+              <th>교정 단어</th>
+              <th>뜻(한국어)</th>
+              <th>신뢰도</th>
               <th>삭제</th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
       </div>
+      <p class="hint">노란색 행은 신뢰도가 낮아 검토가 필요한 항목입니다.</p>
     </section>
 
     <section class="card layout-card">
@@ -105,7 +84,7 @@
   </main>
 
   <footer class="app-footer">
-    <p>© 2025 단어장 생성기 · 클라이언트 전용 · 호스팅만으로 사용 가능</p>
+    <p>© 2025 단어줍줍 · 정확도 모드 · Vercel 서버리스 + OpenAI 비전 사용</p>
   </footer>
 
   <script src="app.js"></script>
