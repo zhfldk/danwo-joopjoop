@@ -33,7 +33,7 @@ export default async function handler(req, res) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "gpt-4o", // 고정밀 비전 모델
+        model: "model: "gpt-4o-mini",
         messages,
         temperature: 0,
         response_format: { type: "json_object" }
