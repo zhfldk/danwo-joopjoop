@@ -42,7 +42,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         // ✅ 문자열만! 필요시 "o3-mini"로 바꿔도 됨
-        model: "gpt-4o-mini",
+        model: "gpt-4o",
         messages,
         temperature: 0,
         response_format: { type: "json_object" }
