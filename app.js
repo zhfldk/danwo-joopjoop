@@ -1,4 +1,3 @@
-
 // ===== Helpers =====
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -18,6 +17,25 @@ const btnPrint = $("#btnPrint");
 const btnPdf = $("#btnPdf");
 
 let entries = []; // { word, corrected, meaning, confidence }
+
+// ---- Fetch helper with timeout & better errors ----
+async function fetchJSONWithErrors(url, options = {}, timeoutMs = 60000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: ctrl.signal });
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch {}
+    if (!res.ok) {
+      const cause = data?.error || text || `${res.status} ${res.statusText}`;
+      throw new Error(cause.slice(0, 500));
+    }
+    return data ?? text;
+  } finally {
+    clearTimeout(id);
+  }
+}
 
 // ---- Image previews ----
 imageInput.addEventListener("change", () => renderThumbs(imageInput.files));
@@ -49,6 +67,7 @@ function filesToFileList(files) { const dt = new DataTransfer(); files.forEach(f
 btnAnalyze.addEventListener("click", async () => {
   const files = Array.from(imageInput.files || []);
   if (!files.length) return alert("이미지를 선택하세요.");
+  btnAnalyze.disabled = true; btnClear.disabled = true;
   try {
     statusEl.textContent = "AI 1차 분석 중…";
     const items = await analyzeWithAI(files);
@@ -81,12 +100,14 @@ btnAnalyze.addEventListener("click", async () => {
       statusEl.textContent = "사전으로 빈 뜻 채우는 중…";
       for (const e of entries) {
         if (!e.meaning) {
-          const def = await fetchDefinitionEN(e.corrected || e.word).catch(()=>null);
-          let meaning = def?.meaning || "";
-          if (meaning) {
-            const ko = await translateToKO(meaning).catch(()=>null);
-            e.meaning = ko || `${meaning} (번역 실패: 직접 수정)`;
-          }
+          try {
+            const def = await fetchDefinitionEN(e.corrected || e.word);
+            const meaning = def?.meaning || "";
+            if (meaning) {
+              const ko = await translateToKO(meaning).catch(()=>null);
+              e.meaning = ko || `${meaning} (번역 실패: 직접 수정)`;
+            }
+          } catch {}
         }
       }
     }
@@ -95,8 +116,10 @@ btnAnalyze.addEventListener("click", async () => {
     statusEl.textContent = "완료";
   } catch (err) {
     console.error(err);
-    statusEl.textContent = "실패: " + err.message;
-    alert("AI 분석에 실패했습니다. 잠시 후 다시 시도하세요.");
+    statusEl.textContent = "실패: " + (err.message || err);
+    alert("AI 분석 실패:\n" + (err.message || err));
+  } finally {
+    btnAnalyze.disabled = false; btnClear.disabled = false;
   }
 });
 
@@ -110,10 +133,11 @@ btnClear.addEventListener("click", () => {
 
 async function analyzeWithAI(files) {
   const fd = new FormData();
-  for (const f of files) fd.append("image", f);
-  const r = await fetch("/api/analyze", { method:"POST", body: fd });
-  if (!r.ok) throw new Error("AI 분석 실패");
-  const j = await r.json();
+  for (const f of files) {
+    if (f.size > 10 * 1024 * 1024) throw new Error(`이미지 ${f.name}가 10MB를 초과합니다.`);
+    fd.append("image", f);
+  }
+  const j = await fetchJSONWithErrors("/api/analyze", { method:"POST", body: fd });
   return (j.items || []).map(x => ({
     word: x.word, meaning_ko: x.meaning_ko, confidence: x.confidence, corrected_word: x.corrected_word
   }));
@@ -123,9 +147,7 @@ async function recheckWithAI(files, lowWords) {
   const fd = new FormData();
   for (const f of files) fd.append("image", f);
   fd.append("lowWords", JSON.stringify(lowWords));
-  const r = await fetch("/api/analyze?mode=recheck", { method:"POST", body: fd });
-  if (!r.ok) throw new Error("재검토 실패");
-  const j = await r.json();
+  const j = await fetchJSONWithErrors("/api/analyze?mode=recheck", { method:"POST", body: fd });
   return j.items || [];
 }
 
@@ -188,12 +210,14 @@ btnDedupe.addEventListener("click", () => {
 btnFill.addEventListener("click", async () => {
   for (const e of entries) {
     if (!e.meaning) {
-      const def = await fetchDefinitionEN(e.corrected || e.word).catch(()=>null);
-      let meaning = def?.meaning || "";
-      if (meaning) {
-        const ko = await translateToKO(meaning).catch(()=>null);
-        e.meaning = ko || `${meaning} (번역 실패: 직접 수정)`;
-      }
+      try {
+        const def = await fetchDefinitionEN(e.corrected || e.word);
+        const meaning = def?.meaning || "";
+        if (meaning) {
+          const ko = await translateToKO(meaning).catch(()=>null);
+          e.meaning = ko || `${meaning} (번역 실패: 직접 수정)`;
+        }
+      } catch {}
     }
   }
   renderTable();
