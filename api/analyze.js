@@ -16,24 +16,33 @@ export default async function handler(req, res) {
   try {
     const { fields, files } = await parseForm(req);
     const mode = (req.query.mode || "analyze").toString();
-    const images = Array.isArray(files.image) ? files.image : [files.image];
-    const base64s = await Promise.all(
-      images.map(f => fs.promises.readFile(f.filepath, { encoding: "base64" }))
+
+    const rawImages = Array.isArray(files.image) ? files.image : [files.image].filter(Boolean);
+    if (!rawImages.length) return res.status(400).json({ error: "No image files" });
+
+    // base64 + 올바른 MIME 타입 확보
+    const imgs = await Promise.all(
+      rawImages.map(async (f) => {
+        const b64 = await fs.promises.readFile(f.filepath, { encoding: "base64" });
+        const mime = f.mimetype || "image/png";
+        return { b64, mime };
+      })
     );
 
     const messages =
       mode === "recheck"
-        ? makeRecheckMessages(JSON.parse(fields.lowWords || "[]"), base64s)
-        : makeAnalyzeMessages(base64s);
+        ? makeRecheckMessages(safeParseJSON(fields.lowWords || "[]") || [], imgs)
+        : makeAnalyzeMessages(imgs);
 
     const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "model: "gpt-4o-mini",
+        // ✅ 문자열만! 필요시 "o3-mini"로 바꿔도 됨
+        model: "gpt-4o-mini",
         messages,
         temperature: 0,
         response_format: { type: "json_object" }
@@ -46,7 +55,6 @@ export default async function handler(req, res) {
     }
 
     const data = await openaiRes.json();
-    // assistant 메시지에서 JSON 파싱
     const content = data?.choices?.[0]?.message?.content;
     const parsed = safeParseJSON(content);
     if (!parsed) throw new Error("Invalid JSON from AI");
@@ -57,7 +65,7 @@ export default async function handler(req, res) {
   }
 }
 
-function makeAnalyzeMessages(base64s) {
+function makeAnalyzeMessages(imgs) {
   return [
     {
       role: "system",
@@ -83,16 +91,16 @@ Rules:
 - word must be A–Z only (allow apostrophes).
 - Merge duplicates; prefer corrected spelling.`
         },
-        ...base64s.map(b64 => ({
+        ...imgs.map(({ b64, mime }) => ({
           type: "image_url",
-          image_url: { url: `data:image/png;base64,${b64}` }
+          image_url: { url: `data:${mime};base64,${b64}` }
         }))
       ]
     }
   ];
 }
 
-function makeRecheckMessages(lowWords, base64s) {
+function makeRecheckMessages(lowWords, imgs) {
   return [
     {
       role: "system",
@@ -109,9 +117,9 @@ function makeRecheckMessages(lowWords, base64s) {
 Return ONLY JSON:
 { "items":[ {"word":"string","corrected_word":"string","confidence":0.0} ] }`
         },
-        ...base64s.map(b64 => ({
+        ...imgs.map(({ b64, mime }) => ({
           type: "image_url",
-          image_url: { url: `data:image/png;base64,${b64}` }
+          image_url: { url: `data:${mime};base64,${b64}` }
         }))
       ]
     }
@@ -121,3 +129,4 @@ Return ONLY JSON:
 function safeParseJSON(str) {
   try { return JSON.parse(str); } catch { return null; }
 }
+
