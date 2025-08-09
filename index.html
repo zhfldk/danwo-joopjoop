@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>단어줍줍 · 정확도 모드</title>
   <link rel="stylesheet" href="style.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;700&display=swap" rel="stylesheet">
-  <!-- PDF -->
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4198900740159186"
-     crossorigin="anonymous"></script>
 
+  <!-- Pretendard는 Google Fonts에 없음. 시스템 폰트 사용 or CDN 별도 사용 권장 -->
+  <!-- AdSense: 스크립트만으로는 광고가 안 뜸. 본문에 <ins class="adsbygoogle"> 슬롯이 있어야 함 -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4198900740159186" crossorigin="anonymous"></script>
+
+  <!-- PDF -->
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 </head>
@@ -50,6 +50,17 @@
 
     <section class="card results-card">
       <h2>2) 단어장 결과</h2>
+
+      <!-- ✅ 실제 광고 슬롯 예시(원하면 이동/복수 사용 가능) -->
+      <!-- data-ad-slot 은 AdSense에서 발급된 슬롯 ID로 교체 -->
+      <!-- <ins class="adsbygoogle"
+           style="display:block; margin:10px 0"
+           data-ad-client="ca-pub-4198900740159186"
+           data-ad-slot="YOUR_SLOT_ID"
+           data-ad-format="auto"
+           data-full-width-responsive="true"></ins>
+      <script>(adsbygoogle = window.adsbygoogle || []).push({});</script> -->
+
       <div class="actions">
         <button id="btnFill" class="btn">뜻 채우기(무료 사전)</button>
         <button id="btnDedupe" class="btn">중복 정리</button>
