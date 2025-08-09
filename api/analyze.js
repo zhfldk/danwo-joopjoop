@@ -1,70 +1,47 @@
-// /api/analyze.js – Vercel serverless function (Chat Completions 버전)
+// /api/analyze.js
+// Vercel Serverless Function (Node.js 런타임)
+// multipart → formidable, OpenAI Chat Completions (이미지+JSON)
+
 export const config = { api: { bodyParser: false } };
 
 import formidable from "formidable";
 import fs from "fs";
 
+// ---------- helpers ----------
 const parseForm = (req) =>
-  new Promise((resolve, reject) =>
-    formidable({ multiples: true }).parse(req, (err, fields, files) =>
-      err ? reject(err) : resolve({ fields, files })
-    )
-  );
-
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).end("POST only");
-  try {
-    const { fields, files } = await parseForm(req);
-    const mode = (req.query.mode || "analyze").toString();
-
-    const rawImages = Array.isArray(files.image) ? files.image : [files.image].filter(Boolean);
-    if (!rawImages.length) return res.status(400).json({ error: "No image files" });
-
-    // base64 + 올바른 MIME 타입 확보
-    const imgs = await Promise.all(
-      rawImages.map(async (f) => {
-        const b64 = await fs.promises.readFile(f.filepath, { encoding: "base64" });
-        const mime = f.mimetype || "image/png";
-        return { b64, mime };
-      })
-    );
-
-    const messages =
-      mode === "recheck"
-        ? makeRecheckMessages(safeParseJSON(fields.lowWords || "[]") || [], imgs)
-        : makeAnalyzeMessages(imgs);
-
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        // ✅ 문자열만! 필요시 "o3-mini"로 바꿔도 됨
-        model: "gpt-4o",
-        messages,
-        temperature: 0,
-        response_format: { type: "json_object" }
-      })
+  new Promise((resolve, reject) => {
+    const form = formidable({
+      multiples: true,
+      maxFileSize: 10 * 1024 * 1024, // 10MB
+      keepExtensions: true,
     });
+    form.parse(req, (err, fields, files) =>
+      err ? reject(err) : resolve({ fields, files })
+    );
+  });
 
-    if (!openaiRes.ok) {
-      const t = await openaiRes.text();
-      throw new Error(`OpenAI error ${openaiRes.status}: ${t}`);
-    }
-
-    const data = await openaiRes.json();
-    const content = data?.choices?.[0]?.message?.content;
-    const parsed = safeParseJSON(content);
-    if (!parsed) throw new Error("Invalid JSON from AI");
-    return res.status(200).json(parsed);
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: String(e) });
-  }
+const toArray = (x) => (Array.isArray(x) ? x : x ? [x] : []);
+function collectImages(files) {
+  const cands = [
+    ...toArray(files?.image),
+    ...toArray(files?.images),
+    ...toArray(files?.file),
+    ...toArray(files?.upload),
+  ].filter(Boolean);
+  return cands;
 }
 
+// 모델이 가끔 텍스트를 섞어줄 수 있어 첫 번째 {..} 블록만 파싱
+function strictJSON(text) {
+  if (!text) return null;
+  const s = text.indexOf("{");
+  const e = text.lastIndexOf("}");
+  if (s === -1 || e === -1 || e < s) return null;
+  try { return JSON.parse(text.slice(s, e + 1)); } catch { return null; }
+}
+function safeParseJSON(str) { try { return JSON.parse(str); } catch { return null; } }
+
+// ---------- prompts ----------
 function makeAnalyzeMessages(imgs) {
   return [
     {
@@ -78,7 +55,7 @@ function makeAnalyzeMessages(imgs) {
         {
           type: "text",
           text:
-`Return ONLY valid JSON:
+`Return ONLY valid JSON (no fences, no commentary):
 {
  "items":[
    {"word":"string","corrected_word":"string","meaning_ko":"string|null","source":"image","confidence":0.0}
@@ -114,7 +91,7 @@ function makeRecheckMessages(lowWords, imgs) {
           type: "text",
           text:
 `Recheck only these words: ${JSON.stringify(lowWords)}
-Return ONLY JSON:
+Return ONLY JSON (no fences, no commentary):
 { "items":[ {"word":"string","corrected_word":"string","confidence":0.0} ] }`
         },
         ...imgs.map(({ b64, mime }) => ({
@@ -126,7 +103,62 @@ Return ONLY JSON:
   ];
 }
 
-function safeParseJSON(str) {
-  try { return JSON.parse(str); } catch { return null; }
+// ---------- main ----------
+export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).end("POST only");
+  try {
+    const { fields, files } = await parseForm(req);
+    const mode = (req.query.mode || "analyze").toString();
+
+    const rawImages = collectImages(files);
+    if (!rawImages.length) return res.status(400).json({ error: "No image files" });
+
+    const imgs = await Promise.all(
+      rawImages.map(async (f) => {
+        const b64 = await fs.promises.readFile(f.filepath, { encoding: "base64" });
+        const mime = f.mimetype || "image/png";
+        return { b64, mime };
+      })
+    );
+
+    const messages =
+      mode === "recheck"
+        ? makeRecheckMessages(safeParseJSON(fields?.lowWords || "[]") || [], imgs)
+        : makeAnalyzeMessages(imgs);
+
+    // 1차: gpt-4o (안정성), 실패 시 4o-mini 폴백
+    let raw;
+    try {
+      raw = await callOpenAI("gpt-4o", messages, true); // JSON 모드 ON
+    } catch (e) {
+      // 폴백 시도 (원인 파악용 메시지를 유지)
+      raw = await callOpenAI("gpt-4o-mini", messages, true);
+    }
+
+    const parsed = strictJSON(raw);
+    if (!parsed) throw new Error("Invalid JSON from AI");
+    return res.status(200).json(parsed);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: String(e.message || e) });
+  }
 }
 
+async function callOpenAI(model, messages, wantJSON) {
+  const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature: 0,
+      ...(wantJSON ? { response_format: { type: "json_object" } } : {}),
+    }),
+  });
+  const t = await r.text();
+  if (!r.ok) throw new Error(`OpenAI error ${r.status} [${model}]: ${t.slice(0, 800)}`);
+  return t;
+}
